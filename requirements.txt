@@ -3,5 +3,5 @@ uvicorn[standard]>=0.29
 supabase>=2.4
 numpy>=1.26
 python-multipart
-tflite-runtime==2.14.0
 python-dotenv
+tflite-runtime>=2.16.0
