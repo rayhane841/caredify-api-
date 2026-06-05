@@ -5,8 +5,16 @@ services:
     buildCommand: >-
       pip install -r requirements.txt &&
       mkdir -p weights &&
-      curl -L "https://drive.google.com/uc?export=download&id=1As4YotMfM19xFawOvzsH1lS_oBrtkBv8" -o weights/caredify_modele_a_1lead_mobile.tflite &&
-      ls -lh weights/
+      curl -L "https://drive.usercontent.google.com/download?id=1mDuSy5Z851swKc4PRsogKOziwFcjgw1T&export=download&confirm=t"
+      -o weights/caredify_modele_a_1lead_mobile.tflite &&
+      python -c "
+      import os;
+      s = os.path.getsize('weights/caredify_modele_a_1lead_mobile.tflite');
+      assert s > 100000, f'Fichier GDrive invalide: {s} bytes';
+      import tflite_runtime.interpreter as tflite;
+      tflite.Interpreter('weights/caredify_modele_a_1lead_mobile.tflite');
+      print('TFLite OK, taille:', s)
+      "
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: SUPABASE_URL
