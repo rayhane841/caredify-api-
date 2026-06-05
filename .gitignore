@@ -1,0 +1,9 @@
+*.tflite
+*.pkl
+*.keras
+*.h5
+__pycache__/
+.env
+venv/
+*.pyc
+.vscode/
