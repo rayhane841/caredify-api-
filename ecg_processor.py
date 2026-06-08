@@ -1,30 +1,63 @@
-import numpy as np  # type: ignore[import]
 import json
+import numpy as np  # type: ignore[import]
 
-def load_config(path="weights/caredify_config.json") -> dict:
-    with open(path) as f:
-        return json.load(f)
+_config_cache: dict | None = None
 
-def preprocess_ecg(ecg_values: list[float], config: dict) -> np.ndarray:
+
+def load_config(path: str = "weights/caredify_config.json") -> dict:
+    global _config_cache
+    if _config_cache is None:
+        with open(path, "r") as f:
+            _config_cache = json.load(f)
+    return _config_cache
+
+
+def preprocess_ecg(
+    ecg_values: list,
+    config: dict,
+    patient_meta: dict | None = None,
+) -> np.ndarray:
     """
-    Prend les valeurs brutes ECG du buffer Flutter,
-    les rééchantillonne à 187 points (input shape du modèle),
-    puis applique le scaler stocké dans config.json.
+    Prétraitement complet identique à l'entraînement PTB-XL :
+    1. Conversion float32
+    2. Nettoyage NaN / Inf
+    3. Clipping artéfacts (± 5 mV)
+    4. Rééchantillonnage → 187 points
+    5. StandardScaler (mean/scale depuis config.json)
+    6. Reshape (1, 187, 1)
     """
+    target_len = config["input_shape"][0]  # 187
     mean  = np.array(config["scaler"]["mean"],  dtype=np.float32)
     scale = np.array(config["scaler"]["scale"], dtype=np.float32)
-    input_len = config["input_shape"][0]  # 187
 
     arr = np.array(ecg_values, dtype=np.float32)
 
-    # Rééchantillonnage linéaire vers 187 points
-    if len(arr) != input_len:
-        x_old = np.linspace(0, 1, len(arr))
-        x_new = np.linspace(0, 1, input_len)
-        arr   = np.interp(x_new, x_old, arr).astype(np.float32)
+    if len(arr) == 0:
+        raise ValueError("ecg_values vide")
 
-    # Normalisation (même scaler que l'entraînement)
+    # ── 1. Nettoyage NaN / Inf ────────────────────────────────────────────────
+    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # ── 2. Clipping artéfacts extrêmes ────────────────────────────────────────
+    arr = np.clip(arr, -5.0, 5.0)
+
+    # ── 3. Rééchantillonnage vers 187 points ──────────────────────────────────
+    if len(arr) != target_len:
+        x_orig = np.linspace(0.0, 1.0, len(arr))
+        x_new  = np.linspace(0.0, 1.0, target_len)
+        arr    = np.interp(x_new, x_orig, arr).astype(np.float32)
+
+    # ── 4. Normalisation StandardScaler ───────────────────────────────────────
     arr = (arr - mean) / (scale + 1e-8)
 
-    # Shape attendue par TFLite : (1, 187, 1)
-    return arr.reshape(1, input_len, 1)
+    # ── 5. Log métadonnées patient ────────────────────────────────────────────
+    if patient_meta:
+        print(
+            f"[PREPROCESS] age={patient_meta.get('age', '?')} "
+            f"sex={patient_meta.get('sex', '?')} "
+            f"weight={patient_meta.get('weight', '?')} "
+            f"bmi={patient_meta.get('bmi', '?')} "
+            f"pathology={patient_meta.get('cardiac_pathology', '?')}"
+        )
+
+    return arr.reshape(1, target_len, 1)

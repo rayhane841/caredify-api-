@@ -1,5 +1,4 @@
 import os
-import json
 from fastapi import FastAPI, Request, HTTPException, Header  # type: ignore[import]
 from fastapi.responses import JSONResponse  # type: ignore[import]
 from typing import Optional
@@ -11,36 +10,47 @@ from supabase_client import supabase
 # ── Init ──────────────────────────────────────────────────────────────────────
 app    = FastAPI(title="CAREDIFY AI API", version="1.0.0")
 config = load_config()
-model  = ModelHandler(config=config)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+
+# Chargement du modèle
+TFLITE_PATH = "weights/caredify_modele_a_1lead_mobile.tflite"
+model = None
+
+if os.path.exists(TFLITE_PATH):
+    try:
+        model = ModelHandler(model_path=TFLITE_PATH, config=config)
+        print(f"[CAREDIFY] ✅ Modèle chargé : {TFLITE_PATH}")
+    except Exception as e:
+        print(f"[CAREDIFY] ❌ Erreur chargement modèle : {e}")
+else:
+    print(f"[CAREDIFY] ⚠️ {TFLITE_PATH} introuvable")
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
     return {
-        "status":  "ok",
-        "model":   config["model_name"],
-        "version": config["version"],
-        "classes": config["classes"],
-        "thresholds": config["thresholds"],
+        "status":       "ok",
+        "model":        config["model_name"],
+        "version":      config["version"],
+        "classes":      config["classes"],
+        "thresholds":   config["thresholds"],
+        "model_loaded": model is not None,
     }
 
 
-# ── Test mock local (sans Supabase) ──────────────────────────────────────────
+# ── Test mock (sans Supabase) ─────────────────────────────────────────────────
 @app.post("/test/predict")
 async def test_predict(request: Request):
     """
-    Endpoint de test : envoie directement des ecg_values JSON.
-    Ne touche pas Supabase. Utilisé pour valider le modèle en local.
-
-    Body JSON attendu :
-    {
-      "ecg_values": [0.1, -0.2, 0.5, ...]   // n'importe quelle longueur
-    }
+    Test direct sans Supabase.
+    Body : {"ecg_values": [...]}
     """
-    body = await request.json()
+    if model is None:
+        raise HTTPException(503, "Modèle non chargé")
+
+    body       = await request.json()
     ecg_values = body.get("ecg_values", [])
 
     if len(ecg_values) < 10:
@@ -51,49 +61,57 @@ async def test_predict(request: Request):
     return result
 
 
-# ── Webhook principal Supabase ────────────────────────────────────────────────
+# ── Webhook Supabase ──────────────────────────────────────────────────────────
 @app.post("/webhook/ecg-new")
 async def ecg_webhook(
     request: Request,
     x_webhook_secret: Optional[str] = Header(None),
 ):
     """
-    Reçoit l'événement INSERT de Supabase sur ecg_readings.
-    1. Vérifie le secret
-    2. Prétraite les ecg_values
-    3. Lance l'inférence TFLite
-    4. UPDATE status dans Supabase : 'pending' → 'normal'/'warning'/'critical'
+    INSERT ecg_readings → analyse TFLite → UPDATE status
+    pending → normal / warning / critical
     """
     # Vérification secret
     if WEBHOOK_SECRET and x_webhook_secret != WEBHOOK_SECRET:
         raise HTTPException(status_code=401, detail="Webhook secret invalide")
 
-    payload = await request.json()
+    if model is None:
+        raise HTTPException(503, "Modèle non chargé")
 
-    # Supabase webhook format : {"type": "INSERT", "record": {...}}
-    record = payload.get("record", {})
-
+    payload    = await request.json()
+    record     = payload.get("record", {})
     ecg_id     = record.get("id")
     ecg_values = record.get("ecg_values", [])
     patient_id = record.get("patient_id")
-    heart_rate = record.get("heart_rate", 0)
 
-    # Validation minimale
+    # Validation
     if not ecg_id:
         return JSONResponse({"skipped": True, "reason": "no id"})
     if len(ecg_values) < 10:
         return JSONResponse({"skipped": True, "reason": "buffer trop court"})
 
-    # Inférence
+    # ── Récupérer métadonnées patient depuis Supabase ─────────────────────────
+    patient_meta = None
     try:
-        arr    = preprocess_ecg(ecg_values, config)
+        if supabase and patient_id:
+            row = supabase.table("patients").select(
+                "age, sex, weight, bmi, bmi_category, cardiac_pathology"
+            ).eq("id", patient_id).single().execute()
+            if row.data:
+                patient_meta = row.data
+                print(f"[CAREDIFY] 👤 Patient récupéré: {patient_meta}")
+    except Exception as e:
+        print(f"[CAREDIFY] ⚠️ Patient meta non récupérée (non bloquant): {e}")
+
+    # ── Preprocessing + inférence ─────────────────────────────────────────────
+    try:
+        arr    = preprocess_ecg(ecg_values, config, patient_meta=patient_meta)
         result = model.predict(arr)
     except Exception as e:
-        # On ne bloque pas Supabase, on log et on sort
         print(f"[CAREDIFY] ❌ Erreur inférence: {e}")
         raise HTTPException(500, str(e))
 
-    # UPDATE Supabase : pending → status réel
+    # ── UPDATE Supabase ───────────────────────────────────────────────────────
     try:
         supabase.table("ecg_readings").update(
             {"status": result["status"]}
@@ -109,8 +127,4 @@ async def ecg_webhook(
         f"status={result['status']}"
     )
 
-    return {
-        "ecg_id":    ecg_id,
-        "patient_id": patient_id,
-        **result,
-    }
+    return {"ecg_id": ecg_id, "patient_id": patient_id, **result}
