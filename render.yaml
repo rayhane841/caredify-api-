@@ -6,7 +6,16 @@ services:
       pip install -r requirements.txt &&
       mkdir -p weights &&
       curl -L "https://github.com/rayhane841/caredify-api-/releases/download/v1.0.0/caredify_modele_a_1lead_mobile.tflite" -o weights/caredify_modele_a_1lead_mobile.tflite &&
-      python -c "import os; s=os.path.getsize('weights/caredify_modele_a_1lead_mobile.tflite'); assert s>100000, f'Fichier trop petit: {s}'; print('✅ TFLite OK, taille:', s, 'bytes')"
+      curl -L "https://github.com/rayhane841/caredify-api-/releases/download/v1.0.0/model_b_mlp_final.keras" -o weights/model_b_mlp_final.keras &&
+      python -c "
+      import os;
+      s_a=os.path.getsize('weights/caredify_modele_a_1lead_mobile.tflite');
+      s_b=os.path.getsize('weights/model_b_mlp_final.keras');
+      assert s_a>100000, f'Modele A trop petit: {s_a}';
+      assert s_b>100000, f'Modele B trop petit: {s_b}';
+      print('✅ Modele A OK:', s_a, 'bytes');
+      print('✅ Modele B OK:', s_b, 'bytes');
+      "
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: SUPABASE_URL

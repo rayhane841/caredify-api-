@@ -1,0 +1,89 @@
+{
+  "model_name": "CAREDIFY_ModelB_MLP",
+  "version": "1.0",
+  "role": "Scoring contextuel sur Modèle A 1-lead — ne déclenche jamais d'alerte seul",
+  "source_model_a": "CAREDIFY_ModeleA_1Lead (MIT-BIH CNN résiduel)",
+  "dataset_ecg": "MIT-BIH Arrhythmia → mapping 5 classes → 3 niveaux CAREDIFY",
+  "dataset_meta": "PTB-XL démographie réelle rééchantillonnée par classe (seed=42)",
+  "architecture": "MLP résiduel 128→256→ResBlock(256)→128→64→3",
+  "inputs": [
+    "score_a",
+    "classe_a",
+    "prob_normal",
+    "prob_suspect",
+    "prob_critique",
+    "age",
+    "sex",
+    "bmi",
+    "bmi_missing"
+  ],
+  "n_features": 9,
+  "calibration": {
+    "temperature": 0.601,
+    "thresholds": {
+      "critique": 0.5,
+      "suspect": 0.45
+    }
+  },
+  "score_combined": {
+    "formula": "0.5×score_a + 0.5×score_b",
+    "w_a": 0.5,
+    "w_b": 0.5
+  },
+  "performance": {
+    "test_accuracy": 99.41,
+    "auc_roc_macro": 0.9956,
+    "macro_f1": 0.9721,
+    "latency_p95_ms": 95.5,
+    "overfit_gap_pct": 0.04,
+    "coherence_rho_ab": -0.0054,
+    "per_class": {
+      "Normal": {
+        "recall": 0.9961,
+        "precision": 0.9977,
+        "f1": 0.9969
+      },
+      "Suspect": {
+        "recall": 0.9423,
+        "precision": 0.9234,
+        "f1": 0.9327
+      },
+      "Critique": {
+        "recall": 0.9926,
+        "precision": 0.9809,
+        "f1": 0.9867
+      }
+    }
+  },
+  "scaler": {
+    "type": "StandardScaler",
+    "mean_": [
+      8.585428161614372,
+      0.17391531352790685,
+      0.8443876371410898,
+      0.06630887635913081,
+      0.08930346782937812,
+      53.72680520022973,
+      0.5323970135226858,
+      25.0,
+      1.0
+    ],
+    "scale_": [
+      19.84511542726711,
+      0.529093429837574,
+      0.28033542238296627,
+      0.1697667770816255,
+      0.23331399343461745,
+      17.11663959198927,
+      0.4989493296066,
+      1.0,
+      1.0
+    ]
+  },
+  "export": {
+    "keras": "/kaggle/working/model_b_mlp_final.keras",
+    "tflite_std": "/kaggle/working/models_b/model_b_mlp.tflite",
+    "tflite_int8": "/kaggle/working/models_b/model_b_mlp_int8.tflite",
+    "scaler_json": "/kaggle/working/models_b/scaler_b.json"
+  }
+}

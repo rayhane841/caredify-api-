@@ -10,7 +10,7 @@ try:
     np = importlib.import_module("numpy")
 except ImportError as exc:
     raise ImportError(
-        "numpy is required to run this module. Install it with: pip install numpy"
+        "numpy is required. Install it with: pip install numpy"
     ) from exc
 
 try:
@@ -37,18 +37,20 @@ class ModelHandler:
         self.interpreter.allocate_tensors()
         self.input_idx  = self.interpreter.get_input_details()[0]["index"]
         self.output_idx = self.interpreter.get_output_details()[0]["index"]
-        print(f"[CAREDIFY] ✅ Modèle TFLite chargé : {model_path}")
+        print(f"[CAREDIFY] ✅ Modèle A TFLite chargé : {model_path}")
 
     def predict(self, input_array: ndarray) -> dict:
         self.interpreter.set_tensor(self.input_idx, input_array)
         self.interpreter.invoke()
         proba = self.interpreter.get_tensor(self.output_idx)[0]
+        # proba shape : (3,) → [P_Normal, P_Suspect, P_Critique]
 
         cfg        = self.config
         weights    = cfg["score_weights"]
         thresholds = cfg["thresholds"]
         classes    = cfg["classes"]
 
+        # Score composite 0-100
         score = int(
             proba[1] * weights["suspect"]  * 100
           + proba[2] * weights["critique"] * 100
@@ -69,4 +71,6 @@ class ModelHandler:
             "score":           score,
             "confidence":      round(confidence, 3),
             "predicted_class": classes[predicted_i],
+            # ✅ Probas brutes exposées pour le Modèle B
+            "proba":           proba.tolist(),
         }
